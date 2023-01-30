@@ -1,0 +1,8 @@
+# Reference: https://www.digitalocean.com/community/tutorials/how-to-use-a-postgresql-database-in-a-flask-application#step-1-creating-the-postgresql-database-and-user
+Flask==2.2.2
+psycopg2-binary==2.9.3
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+recurrent
+pytz

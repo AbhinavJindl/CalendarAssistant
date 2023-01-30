@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Chat Calndar Assistant</title>
+    <meta charset="utf-8" />
+  </head>
+  <body>
+    <h1>Chat Calendar Assistant</h1>
+
+    <div>
+      <button id="authorize_button" onclick="handleAuthClick()">Authorize</button>
+    </div>
+    <div id="chat-box" style="border: 1px solid black; padding: 5px">
+      <div id="user" style="border: 1px solid black; padding: 5px;display:flex;">
+        <h2 id="username"></h2>
+        <button id="signout_button" style="display:block; height:50px" onclick="handleSignoutClick()">Sign Out</button>
+      </div>
+      <div id="chat-container" style="border: 1px solid black; padding: 5px">
+        <div id="chats"></div>
+        <input type="text" name="query" id="query" placeholder="type here..."/>
+        <button id="submit_button" onclick="handleSubmitClick()">Submit</button>
+      </div>
+    </div>   
+
+    <pre id="content" style="white-space: pre-wrap;"></pre>
+    <script type="text/javascript">
+      /* exported gapiLoaded */
+      /* exported gisLoaded */
+      /* exported handleAuthClick */
+      /* exported handleSignoutClick */
+
+      // TODO(developer): Set to client ID and API key from the Developer Console
+      const CLIENT_ID = '';
+      const API_KEY = '';
+
+      // Discovery doc URL for APIs used by the quickstart
+      const PROFILE_DOC = 'https://www.googleapis.com/discovery/v1/apis/oauth2/v2/rest';
+      const CALENDAR_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
+
+      // Authorization scopes required by the API; multiple scopes can be
+      // included, separated by spaces.
+      const SCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile openid';
+
+      let tokenClient;
+      let gapiInited = false;
+      let gisInited = false;
+      let user = null;
+
+      document.getElementById('authorize_button').style.visibility = 'hidden';
+      document.getElementById('chat-box').style.visibility = 'hidden';
+
+      /**
+       * Callback after api.js is loaded.
+       */
+      function gapiLoaded() {
+        gapi.load('client', intializeGapiClient);
+      }
+
+      /**
+       * Callback after the API client is loaded. Loads the
+       * discovery doc to initialize the API.
+       */
+      async function intializeGapiClient() {
+        await gapi.client.init({
+          apiKey: API_KEY,
+          discoveryDocs: [CALENDAR_DOC, PROFILE_DOC],
+        });
+        gapiInited = true;
+        maybeEnableButtons();
+      }
+
+      /**
+       * Callback after Google Identity Services are loaded.
+       */
+      function gisLoaded() {
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: CLIENT_ID,
+          scope: SCOPES,
+          callback: '', // defined later
+        });
+        gisInited = true;
+        maybeEnableButtons();
+      }
+
+      /**
+       * Enables user interaction after all libraries are loaded.
+       */
+      function maybeEnableButtons() {
+        if (gapiInited && gisInited) {
+          document.getElementById('authorize_button').style.visibility = 'visible';
+        }
+      }
+
+      /**
+       *  Sign in the user upon button click.
+       */
+      function handleAuthClick() {
+        tokenClient.callback = async (resp) => {
+          if (resp.error !== undefined) {
+            throw (resp);
+          }
+          document.getElementById('chat-box').style.visibility = 'visible';
+          document.getElementById('authorize_button').innerText = 'Refresh';
+
+          await fetchUserDetails();
+          await listPreviousChat();
+        };
+
+        if (gapi.client.getToken() === null) {
+          // Prompt the user to select a Google Account and ask for consent to share their data
+          // when establishing a new session.
+          tokenClient.requestAccessToken({prompt: 'consent'});
+        } else {
+          // Skip display of account chooser and consent dialog for an existing session.
+          tokenClient.requestAccessToken({prompt: ''});
+        }
+      }
+
+      /**
+       *  Submit the query.
+       */
+       async function handleSubmitClick() {
+        const queryElem = document.getElementById('query');
+
+        query = queryElem.value
+
+        if (query.trim() == "") {
+          return
+        }
+        let response;
+        try {
+          response = await fetch('http://127.0.0.1:5000/chat', {
+              method: 'POST',
+              body: JSON.stringify({'token': gapi.client.getToken(), 'query': query}),
+              headers: {
+                'Content-Type': 'application/json'
+              }
+          })
+        } catch (err) {
+          document.getElementById('chats').innerText = err.message;
+          return;
+        }
+        const chats = await response.json()
+        handleChatsResponse(chats)
+        queryElem.value = ''
+      }
+
+      /**
+       *  Sign out the user upon button click.
+       */
+      function handleSignoutClick() {
+        const token = gapi.client.getToken();
+        if (token !== null) {
+          google.accounts.oauth2.revoke(token.access_token);
+          gapi.client.setToken('');
+          document.getElementById('content').innerText = '';
+          document.getElementById('authorize_button').innerText = 'Authorize';
+          document.getElementById('chat-box').style.visibility = 'hidden';
+        }
+      }
+
+      // fetch User details
+      async function fetchUserDetails() {
+        try {
+          var request = gapi.client.request({
+              'method': 'GET',
+              'path': '/oauth2/v2/userinfo'
+            });
+            // Execute the API request.
+            request.execute(function(response) {
+              user = response;
+              const usernameElem = document.getElementById('username')
+              usernameElem.innerText = `Hi, ${user['name']}`;
+            });
+          } catch (err) {
+            document.getElementById('username').innerText = 'Error while fetching user';
+            return;
+          }
+      }
+
+      /**
+       * Fetch and input chat history
+       */
+      async function listPreviousChat() {
+        let response;
+        try {
+          response = await fetch('http://127.0.0.1:5000/chat_history', {
+            method: 'POST',
+            body: JSON.stringify({'token': gapi.client.getToken()}),
+              headers: {
+                'Content-Type': 'application/json'
+              }
+          })
+        } catch (err) {
+          document.getElementById('chats').innerText = err.message;
+          return;
+        }
+        const chats = await response.json()
+        handleChatsResponse(chats)
+      }
+
+      function handleChatsResponse(chats) {
+        if (!chats || chats.length == 0) {
+          document.getElementById('chats').innerText = 'No chat history found.';
+          return;
+        }
+        // Flatten to string to display
+        let output = chats.map(
+            (chat, idx) => {
+              var htmlObject = `<p>${chat.query} <span style="float:right">${chat.time}</span></p><p>${chat.response}</p>`;
+              return htmlObject
+            });
+        output = output.join('')
+        document.getElementById('chats').innerHTML = output;
+      }
+      
+
+    </script>
+    <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+  </body>
+</html>
